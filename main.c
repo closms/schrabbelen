@@ -161,6 +161,7 @@ find_horiz()
     char *w;
     char *new_words[LEN];
     int num_new_words;
+    int attached_flag;
 
     for (word_num=0; word_num<num_words; word_num++) {
         w = words[word_num];
