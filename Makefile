@@ -1,4 +1,4 @@
-CFLAGS = -g
+CFLAGS = -W -ggdb
 
 scrabble_helper:  main.o
 	$(CC) $(CFLAGS) -o $@ $<

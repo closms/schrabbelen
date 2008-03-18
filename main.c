@@ -1,12 +1,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
+#include <ctype.h>
 
-#define LEN 11  /* Can't change len. */
+enum {
+    HORIZ,
+    VERT,
+};
+
+#define LEN 15  /* Can't change len. */
 
 char board[LEN][LEN];
 char backup_board[LEN][LEN];
+char best_board[LEN][LEN];
 char *tray = NULL;
+char *used_tray = NULL;
 int tray_size = 0;
 char **words = NULL;
 int num_words = 0;
@@ -20,6 +29,42 @@ int letter_scores[26] = {
  1, 1, 1, 1, 1,  /* P, Q, R, S, T */
  1, 1, 1, 1, 1,  /* U, V, W, X, Y */
  1               /* Z */
+};
+
+int letter_mult[LEN][LEN] = {
+    {1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1},
+    {1, 1, 1, 1, 1, 3, 1, 1, 1, 3, 1, 1, 1, 1, 1},
+    {1, 1, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 1},
+    {2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2},
+    {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+    {1, 3, 1, 1, 1, 3, 1, 1, 1, 3, 1, 1, 1, 3, 1},
+    {1, 1, 2, 1, 1, 1, 2, 1, 2, 1, 1, 1, 2, 1, 1},
+    {1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1},
+    {1, 1, 2, 1, 1, 1, 2, 1, 2, 1, 1, 1, 2, 1, 1},
+    {1, 3, 1, 1, 1, 3, 1, 1, 1, 3, 1, 1, 1, 3, 1},
+    {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+    {2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2},
+    {1, 1, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 1},
+    {1, 1, 1, 1, 1, 3, 1, 1, 1, 3, 1, 1, 1, 1, 1},
+    {1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1},
+};
+
+int word_mult[LEN][LEN] = {
+    {3, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 3},
+    {1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1},
+    {1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1},
+    {1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1},
+    {1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1},
+    {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+    {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+    {3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3},
+    {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+    {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+    {1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1},
+    {1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1},
+    {1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1},
+    {1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1},
+    {3, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 3},
 };
 
 #define SCORE(x) (letter_scores[(x)-'a'])
@@ -62,6 +107,10 @@ read_board()
     if (buf[strlen(buf)-1] == '\n')
         buf[strlen(buf)-1] = 0;
     tray = strdup(buf);
+    assert(tray);
+    used_tray = calloc(strlen(tray)+1, sizeof(int));
+    assert(used_tray);
+    tray_size = strlen(tray);
     fprintf(stderr, "Read %d tray letters.\n", strlen(tray));
 }
 
@@ -97,10 +146,14 @@ load_words()
         exit(99);
     }
     for (ix = 0; ix < n; ix++) {
+        char *pc;
         if (fgets(buf, 1024, f) != NULL) {
             if (buf[strlen(buf)-1] == '\n')
                 buf[strlen(buf)-1] = 0;
             words[num_words++] = strdup(buf);
+            for (pc=words[num_words-1]; *pc!=0; pc++) {
+                *pc = tolower(*pc);
+            }
         }
     }
     fclose(f);
@@ -109,27 +162,46 @@ load_words()
 void
 save_best_board()
 {
-
+    int row;
+    for (row = 0; row < LEN; row++) {
+        memcpy(best_board[row], board[row], LEN*sizeof(char));
+    }
 }
 
 void
 reset_board()
 {
+    memcpy(board, backup_board, sizeof(board));
 }
 
 void
 reset_tray()
 {
+    memset(used_tray, 0, tray_size * sizeof(int));
 }
 
 int
 letter_avail(char c)
 {
+    int ix;
+    for (ix=0; ix < tray_size; ix++) {
+        if (tray[ix] == c && used_tray[ix] == 0)
+            return 1;
+    }
+    return 0;
 }
 
 void
 mark_used(char c)
 {
+    int ix;
+    for (ix=0; ix < tray_size; ix++) {
+        if (tray[ix] == c && used_tray[ix] == 0) {
+            used_tray[ix] = 1;
+            return;
+        }
+    }
+    assert(0);
 }
 
 char *
@@ -140,6 +212,7 @@ is_vert_word(int row, int col)
      * letter. */
 
     /* strdup() and return. */
+    return NULL;
 }
 
 int
@@ -148,12 +221,23 @@ is_word(char *w)
 }
 
 int
-score_word(char *w)
+score_word(int row, int col, int direction)
 {
+    int ix;
+    int score = 0;
+    int mult = 1;
+    assert(direction == HORIZ);
+
+    /* Horizontal word */
+    for (ix = col; ix < LEN && board[row][ix] != '_'; ix++) {
+        score += (SCORE(board[row][ix]) * letter_mult[row][ix]);
+        mult *= word_mult[row][ix];
+    }
+    return score * mult;
 }
 
 void
-find_horiz()
+search(int dir)
 {
     int word_num, row_num, col_num;
     int score = 0;
@@ -161,11 +245,12 @@ find_horiz()
     char *w;
     char *new_words[LEN];
     int num_new_words;
-    int attached_flag;
+    int attached_flag, placed_flag;
 
     for (word_num=0; word_num<num_words; word_num++) {
         w = words[word_num];
         word_len = strlen(w);
+//        printf("Try word %s\n", w);
 
         /* Output some indication that we're making progress. */
         if (word_num % 10000 == 0) {
@@ -174,6 +259,7 @@ find_horiz()
         }
 
         for (row_num=0; row_num<LEN; row_num++) {
+//            printf("row: %d\n", row_num);
             /* Try to place the word in a row */
 
             stop = LEN-word_len;
@@ -186,6 +272,7 @@ find_horiz()
                 reset_board();
                 reset_tray();
                 attached_flag = 0;
+                placed_flag = 0;
                 /* Try to place word horizontally in row row_num and
                  * column col_num.
                  */
@@ -201,14 +288,19 @@ find_horiz()
 
                 /* Match up letters, iterate over the letters of the word. */
                 for (ltr = 0; ltr<word_len; ltr++) {
+                    if (row_num==((LEN+1)/2) && (col_num+ltr)==((LEN+1)/2)) {
+                        attached_flag = 1;
+                    }
                     if (board[row_num][col_num+ltr] != '_') {
                         /* board space is in use. */
                         if (board[row_num][col_num+ltr] == w[ltr]) {
                             /* Good, the letter is already in place. */
                             attached_flag = 1;
+//                            printf("using existing letter '%c'\n", w[ltr]);
                         }
                         else {
                             /* mismatch, move on to next column. */
+//                            printf("existing word is blocking this word.\n");
                             goto next_col;
                         }
                     }
@@ -218,23 +310,30 @@ find_horiz()
                         if (letter_avail(w[ltr])) {
                             /* Place the letter and move on. */
                             mark_used(w[ltr]);
+                            board[row_num][col_num+ltr] = w[ltr];
+                            placed_flag = 1;
+//                            printf("good, using letter from tray\n");
                         }
                         else {
                             /* Letter isn't in our tray, move to next column
                              * and keep looking. */
+//                            printf("needed letter isn't avail.\n");
                             goto next_col;
                         }
                     }
                 }
 
-                if (attached_flag == 0) {
+//                printf("OK?\n");
+                if (attached_flag == 0 || placed_flag == 0) {
                     /* Too bad, word isn't attached to the rest of the puzzle.
                      */
                     goto next_col;
                 }
+//                printf("OK\n");
 
                 /* Is it legal? */
 
+#if 0
                 /* First build a list of all the new words we made. */
                 /* We know that the word is not bordered on the left and
                  * right by another word.  So we just need to check for
@@ -260,16 +359,15 @@ find_horiz()
                         goto next_col;
                     }
                 }
-
+#endif
                 /* Looks like everything is nice and legal, so compute the
                  * total score. */
-                score = 0;
-                for (nix=0; nix<num_new_words; nix++) {
-                    score += score_word(new_words[nix]);
-                }
+                score = score_word(row_num, col_num, HORIZ);
 
                 /* Is this the best words we've found? */
+//                printf("%s, %d, %d\n", w, score, best_score);
                 if (score > best_score) {
+                    fprintf(stderr, "new best score: %d, %s\n", score, w);
                     best_score = score;
                     save_best_board();
                 }
@@ -286,13 +384,15 @@ next_word:
 }
 
 void
-find_vert()
-{
-}
-
-void
 print_result()
 {
+    int col, row;
+    for (row=0; row<LEN; row++) {
+        for (col=0; col<LEN; col++) {
+            putc(best_board[row][col], stdout);
+        }
+        putc('\n', stdout);
+    }
 }
 
 
@@ -303,8 +403,8 @@ main()
     read_board();
     load_words();
 
-    find_horiz();
-    find_vert();
+    search(HORIZ);
+    search(VERT);
 
     print_result();
 
