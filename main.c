@@ -3,6 +3,7 @@
 #include <string.h>
 #include <assert.h>
 #include <ctype.h>
+#include <unistd.h>
 
 enum {
     HORIZ,
@@ -10,6 +11,15 @@ enum {
 };
 
 #define LEN 15  /* Can't change len. */
+
+#define GREY   "[00;37m"
+#define LBLUE  "[00;36m"
+#define PURPLE "[00;35m"
+#define BLUE   "[00;34m"
+#define ORANGE "[00;33m"
+#define GREEN  "[00;32m"
+#define RED    "[00;31m"
+#define NORM   "[00m"
 
 char board[LEN][LEN];
 char backup_board[LEN][LEN];
@@ -24,11 +34,11 @@ int empty_board = 1;
 
 int letter_scores[26] = {
  1, 1, 1, 1, 1,  /* A, B, C, D, E */
- 1, 1, 1, 1, 1,  /* F, G, H, I, J */
+ 1, 3, 4, 1, 1,  /* F, G, H, I, J */
  1, 1, 1, 1, 1,  /* K, L, M, N, O */
- 1, 1, 1, 1, 1,  /* P, Q, R, S, T */
- 1, 1, 1, 1, 1,  /* U, V, W, X, Y */
- 1               /* Z */
+ 1, 7, 1, 1, 1,  /* P, Q, R, S, T */
+ 1, 1, 4, 1, 4,  /* U, V, W, X, Y */
+ 6               /* Z */
 };
 
 int letter_mult[LEN][LEN] = {
@@ -221,17 +231,25 @@ is_word(char *w)
 }
 
 int
-score_word(int row, int col, int direction)
+score_word(int row, int col, int dir)
 {
     int ix;
     int score = 0;
     int mult = 1;
-    assert(direction == HORIZ);
 
-    /* Horizontal word */
-    for (ix = col; ix < LEN && board[row][ix] != '_'; ix++) {
-        score += (SCORE(board[row][ix]) * letter_mult[row][ix]);
-        mult *= word_mult[row][ix];
+    if (dir == HORIZ) {
+        /* Horizontal word */
+        for (ix = col; ix < LEN && board[row][ix] != '_'; ix++) {
+            score += (SCORE(board[row][ix]) * letter_mult[row][ix]);
+            mult *= word_mult[row][ix];
+        }
+    }
+    else {
+        /* Vertical word */
+        for (ix = row; ix < LEN && board[ix][col] != '_'; ix++) {
+            score += (SCORE(board[ix][col]) * letter_mult[ix][col]);
+            mult *= word_mult[ix][col];
+        }
     }
     return score * mult;
 }
@@ -241,7 +259,7 @@ search(int dir)
 {
     int word_num, row_num, col_num;
     int score = 0;
-    int word_len, stop, ltr, nix;
+    int word_len, rstop, cstop, ltr, nix;
     char *w;
     char *new_words[LEN];
     int num_new_words;
@@ -257,13 +275,22 @@ search(int dir)
             fputc('.', stderr);
             fflush(stderr);
         }
+    
+        if (dir == HORIZ)
+            rstop = LEN;
+        else
+            rstop = LEN-word_len;
 
-        for (row_num=0; row_num<LEN; row_num++) {
+        for (row_num=0; row_num<rstop; row_num++) {
 //            printf("row: %d\n", row_num);
             /* Try to place the word in a row */
 
-            stop = LEN-word_len;
-            for (col_num=0; col_num<stop; col_num++) {
+            if (dir == HORIZ )
+                cstop = LEN-word_len;
+            else
+                cstop = LEN;
+
+            for (col_num=0; col_num<cstop; col_num++) {
 
                 /* When we try anew to place the word, we need to reset
                  * the letter tray and the game board back to the original
@@ -278,22 +305,44 @@ search(int dir)
                  */
 
                 /* words can't start right after another word. */
-                if (col_num > 0 && board[row_num][col_num-1] != '_')
-                    goto next_col;
+                if (dir == HORIZ) {
+                    if (col_num > 0 && board[row_num][col_num-1] != '_')
+                        goto next_col;
+                }
+                else {
+                    if (row_num > 0 && board[row_num-1][col_num] != '_')
+                        goto next_col;
+                }
 
                 /* words can't end right in-front of another word. */
-                if ((col_num+word_len)<(LEN-1)
-                        && board[row_num][col_num+word_len+1] != '_')
-                    goto next_col;
+                if (dir == HORIZ) {
+                    if ((col_num+word_len)<(LEN-1)
+                            && board[row_num][col_num+word_len+1] != '_')
+                        goto next_col;
+                }
+                else {
+                    if ((row_num+word_len)<(LEN-1)
+                            && board[row_num+word_len+1][col_num] != '_')
+                        goto next_col;
+                }
 
                 /* Match up letters, iterate over the letters of the word. */
                 for (ltr = 0; ltr<word_len; ltr++) {
-                    if (row_num==((LEN+1)/2) && (col_num+ltr)==((LEN+1)/2)) {
-                        attached_flag = 1;
+                    if (dir == HORIZ) {
+                        if (row_num==(LEN/2)&&(col_num+ltr)==(LEN/2)) {
+                            attached_flag = 1;
+                        }
                     }
-                    if (board[row_num][col_num+ltr] != '_') {
+                    else {
+                        if ((row_num+ltr)==(LEN/2)&&col_num==(LEN/2)) {
+                            attached_flag = 1;
+                        }
+                    }
+                    if ((dir == HORIZ && board[row_num][col_num+ltr] != '_')
+                     || (dir == VERT && board[row_num+ltr][col_num] != '_')) {
                         /* board space is in use. */
-                        if (board[row_num][col_num+ltr] == w[ltr]) {
+                        if ((dir==HORIZ&&board[row_num][col_num+ltr]==w[ltr])
+                          ||(dir==VERT&&board[row_num+ltr][col_num]==w[ltr])) {
                             /* Good, the letter is already in place. */
                             attached_flag = 1;
 //                            printf("using existing letter '%c'\n", w[ltr]);
@@ -310,7 +359,10 @@ search(int dir)
                         if (letter_avail(w[ltr])) {
                             /* Place the letter and move on. */
                             mark_used(w[ltr]);
-                            board[row_num][col_num+ltr] = w[ltr];
+                            if (dir == HORIZ)
+                                board[row_num][col_num+ltr] = w[ltr];
+                            else
+                                board[row_num+ltr][col_num] = w[ltr];
                             placed_flag = 1;
 //                            printf("good, using letter from tray\n");
                         }
@@ -362,12 +414,12 @@ search(int dir)
 #endif
                 /* Looks like everything is nice and legal, so compute the
                  * total score. */
-                score = score_word(row_num, col_num, HORIZ);
+                score = score_word(row_num, col_num, dir);
 
                 /* Is this the best words we've found? */
 //                printf("%s, %d, %d\n", w, score, best_score);
                 if (score > best_score) {
-                    fprintf(stderr, "new best score: %d, %s\n", score, w);
+                    fprintf(stderr, "%s(%d)", w, score);
                     best_score = score;
                     save_best_board();
                 }
@@ -383,13 +435,27 @@ next_word:
     fputc('\n', stderr);
 }
 
+
 void
 print_result()
 {
     int col, row;
+    int istty;
+
+    istty = (access("/dev/tty", F_OK)==0);
     for (row=0; row<LEN; row++) {
         for (col=0; col<LEN; col++) {
+            if (istty && word_mult[row][col] == 3)
+                fputs(RED, stdout);
+            if (istty && word_mult[row][col] == 2)
+                fputs(BLUE, stdout);
+            if (istty && letter_mult[row][col] == 3)
+                fputs(GREEN, stdout);
+            if (istty && letter_mult[row][col] == 2)
+                fputs(ORANGE, stdout);
             putc(best_board[row][col], stdout);
+            if (istty)
+                fputs(NORM, stdout);
         }
         putc('\n', stdout);
     }
