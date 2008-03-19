@@ -32,6 +32,11 @@ int num_words = 0;
 int best_score = 0;
 int empty_board = 1;
 
+char letter_map[26];
+char backup_letter_map[26];
+
+#define EMPTY_TRAY_BONUS 50
+
 int letter_scores[26] = {
  1, 1, 1, 1, 1,  /* A, B, C, D, E */
  1, 3, 4, 1, 1,  /* F, G, H, I, J */
@@ -79,11 +84,37 @@ int word_mult[LEN][LEN] = {
 
 #define SCORE(x) (letter_scores[(x)-'a'])
 
+#define FLAG_LETTER(x) (letter_map[(x)-'a']++)
+
+int
+reset_letter_map()
+{
+    memcpy(letter_map, backup_letter_map, 26);
+}
+
+int
+enough_letters(char *word)
+{
+    char *pc;
+    int ret = 1;
+    for (pc = word; *pc!=0; pc++) {
+        letter_map[*pc-'a']--;
+        if (letter_map[*pc-'a'] < 0) {
+            ret = 0;
+            goto done;
+        }
+    }
+done:
+    reset_letter_map();
+    return ret;
+}
+
 void
 read_board()
 {
     char buf[1024];
     int ix, ix2;
+    char *pc;
 
     /* Read board. */
     for (ix = 0; ix < LEN; ix++) {
@@ -108,20 +139,40 @@ read_board()
             }
             board[ix][ix2] = buf[ix2];
             backup_board[ix][ix2] = buf[ix2];
+            if (buf[ix2] != '_') {
+                FLAG_LETTER(buf[ix2]);
+            }
         }
     }
     fprintf(stderr, "Read game board.\n");
 
     /* Read tray letters */
-    fgets(buf, 1024, stdin);
-    if (buf[strlen(buf)-1] == '\n')
-        buf[strlen(buf)-1] = 0;
-    tray = strdup(buf);
-    assert(tray);
+    pc = fgets(buf, 1024, stdin);
+    if (pc == NULL) {
+        fprintf(stderr, "Autogenerating tray.\n");
+        srand(time(NULL));
+        tray = malloc(8+1);
+        assert(tray);
+        for (ix2=0; ix2<8; ix2++) {
+            tray[ix2] = (rand() % 26) + 'a';
+        }
+        tray[8] = 0;
+    }
+    else {
+        if (buf[strlen(buf)-1] == '\n')
+            buf[strlen(buf)-1] = 0;
+        tray = strdup(buf);
+        assert(tray);
+    }
     used_tray = calloc(strlen(tray)+1, sizeof(int));
     assert(used_tray);
     tray_size = strlen(tray);
+    for (ix2 = 0; ix2 < tray_size; ix2++) {
+        FLAG_LETTER(tray[ix2]);
+    }
     fprintf(stderr, "Read %d tray letters.\n", strlen(tray));
+
+    memcpy(backup_letter_map, letter_map, 26);
 }
 
 void
@@ -131,9 +182,9 @@ load_words()
     int n, ix;
     char buf[1024];
 
-    f = popen("/usr/bin/wc -l /usr/share/dict/words", "r");
+    f = popen("/usr/bin/wc -l words", "r");
     if (f == NULL) {
-        perror("popen(/usr/bin/wc -l /usr/share/dict/words) failed");
+        perror("popen(/usr/bin/wc -l words) failed");
         exit(99);
     }
     if (fscanf(f, "%d", &n) != 1) {
@@ -141,11 +192,10 @@ load_words()
         exit(99);
     }
     pclose(f);
-    fprintf(stderr, "Read %d words from dictionary.\n", n);
 
-    f = fopen("/usr/share/dict/words", "r");
+    f = fopen("words", "r");
     if (f == NULL) {
-        perror("fopen(/usr/share/dict/words) failed");
+        perror("fopen(words) failed");
         exit(99);
     }
 
@@ -160,13 +210,25 @@ load_words()
         if (fgets(buf, 1024, f) != NULL) {
             if (buf[strlen(buf)-1] == '\n')
                 buf[strlen(buf)-1] = 0;
+            for (pc=buf; *pc!=0; pc++) {
+                int b;
+                b = isupper(*pc);
+                if (b) {
+                    goto again;
+                }
+            }
             words[num_words++] = strdup(buf);
+#if 0
             for (pc=words[num_words-1]; *pc!=0; pc++) {
                 *pc = tolower(*pc);
             }
+#endif
         }
+again:
+        ;
     }
     fclose(f);
+    fprintf(stderr, "Read %d words from dictionary.\n", num_words);
 }
 
 void
@@ -214,28 +276,13 @@ mark_used(char c)
     assert(0);
 }
 
-char *
-is_vert_word(int row, int col)
-{
-    /* (row,col) is some position on the board with a letter in it.
-     * Find the boundries of the word (only if its longer then a single
-     * letter. */
-
-    /* strdup() and return. */
-    return NULL;
-}
-
-int
-is_word(char *w)
-{
-}
-
 int
 score_word(int row, int col, int dir)
 {
     int ix;
     int score = 0;
     int mult = 1;
+    int bonus;
 
     if (dir == HORIZ) {
         /* Horizontal word */
@@ -251,7 +298,13 @@ score_word(int row, int col, int dir)
             mult *= word_mult[ix][col];
         }
     }
-    return score * mult;
+    bonus = EMPTY_TRAY_BONUS;
+    for (ix=0; ix < tray_size; ix++) {
+        if (used_tray[ix] == 0) {
+            bonus = 0;
+        }
+    }
+    return (score * mult) + bonus;
 }
 
 void
@@ -267,6 +320,9 @@ search(int dir)
 
     for (word_num=0; word_num<num_words; word_num++) {
         w = words[word_num];
+        if (!enough_letters(w)) {
+            continue;
+        }
         word_len = strlen(w);
 //        printf("Try word %s\n", w);
 
@@ -279,14 +335,14 @@ search(int dir)
         if (dir == HORIZ)
             rstop = LEN;
         else
-            rstop = LEN-word_len;
+            rstop = LEN-word_len+1;
 
         for (row_num=0; row_num<rstop; row_num++) {
 //            printf("row: %d\n", row_num);
             /* Try to place the word in a row */
 
             if (dir == HORIZ )
-                cstop = LEN-word_len;
+                cstop = LEN-word_len+1;
             else
                 cstop = LEN;
 
@@ -442,7 +498,8 @@ print_result()
     int col, row;
     int istty;
 
-    istty = (access("/dev/tty", F_OK)==0);
+    /*istty = (access("/dev/tty", F_OK)==0);*/
+    istty = 0;
     for (row=0; row<LEN; row++) {
         for (col=0; col<LEN; col++) {
             if (istty && word_mult[row][col] == 3)
