@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <search.h>
 
 enum {
     HORIZ,
@@ -205,8 +206,13 @@ load_words()
         perror("malloc() failed");
         exit(99);
     }
+    if (hcreate(n) == 0) {
+        perror("hcreate()");
+        exit(99);
+    }
     for (ix = 0; ix < n; ix++) {
         char *pc;
+        struct entry hent;
         if (fgets(buf, 1024, f) != NULL) {
             if (buf[strlen(buf)-1] == '\n')
                 buf[strlen(buf)-1] = 0;
@@ -217,12 +223,21 @@ load_words()
                     goto again;
                 }
             }
-            words[num_words++] = strdup(buf);
+            pc = strdup(buf);
+            words[num_words++] = pc;
 #if 0
             for (pc=words[num_words-1]; *pc!=0; pc++) {
                 *pc = tolower(*pc);
             }
 #endif
+            /* Load word into word hash table */
+            hent.key = pc;
+            hent.data = (void*)1;
+            if (hsearch(hent, ENTER) == 0) {
+                perror("hearch()");
+                exit(99);
+            }
+
         }
 again:
         ;
@@ -298,13 +313,92 @@ score_word(int row, int col, int dir)
             mult *= word_mult[ix][col];
         }
     }
-    bonus = EMPTY_TRAY_BONUS;
-    for (ix=0; ix < tray_size; ix++) {
-        if (used_tray[ix] == 0) {
-            bonus = 0;
-        }
+
+    return score * mult;
+}
+
+char *
+is_vert_word(int row_num, int col_num, int *pr, int *pc)
+{
+    /* If this cell was empty on the original board, and one of the cells
+     * above or below (or both) were occupied in the original board, then
+     * this is a new word.
+     */
+    char buf[LEN+1];
+    int bix = 0;
+
+    if ( /* Case 1: word was already on the board. */
+        (backup_board[row_num][col_num] != '_') ||
+         /* Case 2: vert word starts at top of board. */
+        (row_num==0 && backup_board[row_num+1][col_num] == '_') ||
+         /* Case 3: vert word ends at bottom of board. */
+        (row_num+1==LEN && backup_board[row_num-1][col_num] == '_') ||
+         /* Case 4: Word is in the middle but neighbours are blank. */
+        ((backup_board[row_num-1][col_num] == '_' &&
+        backup_board[row_num+1][col_num] == '_')))
+    {
+        return NULL;
     }
-    return (score * mult) + bonus;
+
+    /* Find the beginning of the word */
+    while(row_num > 0 && board[row_num][col_num] != '_')
+        row_num--;
+    row_num++;
+    *pr = row_num;
+    *pc = col_num;
+
+    /* Copy word */
+    while(row_num < LEN && board[row_num][col_num] != '_')
+        buf[bix++] = board[row_num++][col_num];
+
+    buf[bix] = 0;
+    return strdup(buf);
+}
+
+char *
+is_horiz_word(int row_num, int col_num, int *pr, int *pc)
+{
+    /* If this cell was empty on the original board, and one of the cells
+     * left or right (or both) were occupied in the original board, then
+     * this is a new word.
+     */
+    char buf[LEN+1];
+    int bix = 0;
+
+    if ( /* Case 1: word was already on the board. */
+        (backup_board[row_num][col_num] != '_') ||
+         /* Case 2: horiz word starts at left of board. */
+        (col_num==0 && backup_board[row_num][col_num+1] == '_') ||
+         /* Case 3: horiz word ends at right of board. */
+        (col_num+1==LEN && backup_board[row_num][col_num-1] == '_') ||
+         /* Case 4: Word is in the middle but neighbours are blank. */
+        ((backup_board[row_num][col_num-1] == '_' &&
+        backup_board[row_num][col_num+1] == '_')))
+    {
+        return NULL;
+    }
+    
+    /* Find the beginning of the word */
+    while(col_num > 0 && board[row_num][col_num] != '_')
+        col_num--;
+    col_num++;
+    *pr = row_num;
+    *pc = col_num;
+
+    /* Copy word */
+    while(col_num < LEN && board[row_num][col_num] != '_')
+        buf[bix++] = board[row_num][col_num++];
+
+    buf[bix] = 0;
+    return strdup(buf);
+}
+
+int
+is_word(char *word)
+{
+    struct entry hent;
+    hent.key = word;
+    return hsearch(hent, FIND)!=NULL;
 }
 
 void
@@ -315,8 +409,11 @@ search(int dir)
     int word_len, rstop, cstop, ltr, nix;
     char *w;
     char *new_words[LEN];
+    int new_words_r[LEN];
+    int new_words_c[LEN];
     int num_new_words;
     int attached_flag, placed_flag;
+    int bonus;
 
     for (word_num=0; word_num<num_words; word_num++) {
         w = words[word_num];
@@ -324,12 +421,10 @@ search(int dir)
             continue;
         }
         word_len = strlen(w);
-//        printf("Try word %s\n", w);
 
         /* Output some indication that we're making progress. */
         if (word_num % 10000 == 0) {
             fputc('.', stderr);
-            fflush(stderr);
         }
     
         if (dir == HORIZ)
@@ -338,7 +433,6 @@ search(int dir)
             rstop = LEN-word_len+1;
 
         for (row_num=0; row_num<rstop; row_num++) {
-//            printf("row: %d\n", row_num);
             /* Try to place the word in a row */
 
             if (dir == HORIZ )
@@ -401,11 +495,9 @@ search(int dir)
                           ||(dir==VERT&&board[row_num+ltr][col_num]==w[ltr])) {
                             /* Good, the letter is already in place. */
                             attached_flag = 1;
-//                            printf("using existing letter '%c'\n", w[ltr]);
                         }
                         else {
                             /* mismatch, move on to next column. */
-//                            printf("existing word is blocking this word.\n");
                             goto next_col;
                         }
                     }
@@ -420,28 +512,23 @@ search(int dir)
                             else
                                 board[row_num+ltr][col_num] = w[ltr];
                             placed_flag = 1;
-//                            printf("good, using letter from tray\n");
                         }
                         else {
                             /* Letter isn't in our tray, move to next column
                              * and keep looking. */
-//                            printf("needed letter isn't avail.\n");
                             goto next_col;
                         }
                     }
                 }
 
-//                printf("OK?\n");
                 if (attached_flag == 0 || placed_flag == 0) {
                     /* Too bad, word isn't attached to the rest of the puzzle.
                      */
                     goto next_col;
                 }
-//                printf("OK\n");
 
                 /* Is it legal? */
 
-#if 0
                 /* First build a list of all the new words we made. */
                 /* We know that the word is not bordered on the left and
                  * right by another word.  So we just need to check for
@@ -449,17 +536,31 @@ search(int dir)
                  */
 
                 num_new_words = 0;
-                /* Part 1, build the list of vertical words. */
+                /* Part 1, build the list of vert/hotiz words. */
                 for (ltr=0; ltr<word_len; ltr++) {
                     char *pc;
-                    if ((pc=is_vert_word(row_num, col_num+ltr))!=NULL) {
-                        new_words[num_new_words] = pc;
+                    if (dir==HORIZ) {
+                        /* New word is horiz, so check for vert words. */
+                        if ((pc=is_vert_word(row_num, col_num+ltr,
+                                        &new_words_r[num_new_words],
+                                        &new_words_c[num_new_words]))!=NULL) {
+                            new_words[num_new_words++] = pc;
+                        }
+                    }
+                    else {
+                        /* New word is vert so check for horiz words. */
+                        if ((pc=is_horiz_word(row_num+ltr, col_num,
+                                        &new_words_r[num_new_words],
+                                        &new_words_c[num_new_words]))!=NULL) {
+                            new_words[num_new_words++] = pc;
+                        }
                     }
                 }
 
                 /* From that list, check if the words are real words */
                 for (nix=0; nix<num_new_words; nix++) {
-                    if (!is_word(new_words[nix])) {
+                    int isword = is_word(new_words[nix]);
+                    if (!isword) {
                         /* Bummer, free temp data, move on to next position. */
                         for(ltr=0; ltr<num_new_words; ltr++) {
                             free(new_words[ltr]);
@@ -467,13 +568,27 @@ search(int dir)
                         goto next_col;
                     }
                 }
-#endif
+
                 /* Looks like everything is nice and legal, so compute the
                  * total score. */
                 score = score_word(row_num, col_num, dir);
+                for(nix = 0; nix < num_new_words; nix++) {
+                    score += score_word(new_words_r[nix],
+                                        new_words_c[nix],
+                                        dir);
+                    free(new_words[nix]);
+                }
+
+                /* Check for empty tray bonus. */
+                bonus = EMPTY_TRAY_BONUS;
+                for (nix=0; nix < tray_size; nix++) {
+                    if (used_tray[nix] == 0) {
+                        bonus = 0;
+                    }
+                }
+                score += bonus;
 
                 /* Is this the best words we've found? */
-//                printf("%s, %d, %d\n", w, score, best_score);
                 if (score > best_score) {
                     fprintf(stderr, "%s(%d)", w, score);
                     best_score = score;
