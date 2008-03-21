@@ -1,4 +1,4 @@
-/* $Id: main.c,v 1.8 2008/03/21 02:22:10 mike Exp $ */
+/* $Id: main.c,v 1.9 2008/03/21 04:19:31 mike Exp $ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,8 +23,8 @@ enum {
 #define RED    "[00;31m"
 #define NORM   "[00m"
 
-char Version[] = "$Revision: 1.8 $";
-char Date[] = "$Date: 2008/03/21 02:22:10 $";
+char Version[] = "$Revision: 1.9 $";
+char Date[] = "$Date: 2008/03/21 04:19:31 $";
 
 char board[LEN][LEN];
 char backup_board[LEN][LEN];
@@ -39,6 +39,8 @@ int empty_board = 1;
 
 char letter_map[26];
 char backup_letter_map[26];
+
+int debug_score = 0;
 
 #define EMPTY_TRAY_BONUS 50
 
@@ -303,10 +305,19 @@ score_word(int row, int col, int dir)
     int mult = 1;
     int bonus;
 
+    if (debug_score)
+        printf("SCORE:\n");
+
     if (dir == HORIZ) {
         /* Horizontal word */
         for (ix = col; ix < LEN && board[row][ix] != '_'; ix++) {
             score += (SCORE(board[row][ix]) * letter_mult[row][ix]);
+            if (debug_score)
+                printf("(%c): %d += %d * %d\n",
+                    board[row][ix],
+                    score,
+                    SCORE(board[row][ix]),
+                    letter_mult[row][ix]);
             mult *= word_mult[row][ix];
         }
     }
@@ -314,10 +325,18 @@ score_word(int row, int col, int dir)
         /* Vertical word */
         for (ix = row; ix < LEN && board[ix][col] != '_'; ix++) {
             score += (SCORE(board[ix][col]) * letter_mult[ix][col]);
+            if (debug_score)
+                printf("(%c): %d += %d * %d\n",
+                    board[ix][col],
+                    score,
+                    SCORE(board[ix][col]),
+                    letter_mult[ix][col]);
             mult *= word_mult[ix][col];
         }
     }
 
+    if (debug_score)
+        printf("mult: %d = %d * %d\n", score*mult, score, mult);
     return score * mult;
 }
 
@@ -345,9 +364,8 @@ is_vert_word(int row_num, int col_num, int *pr, int *pc)
     }
 
     /* Find the beginning of the word */
-    while(row_num > 0 && board[row_num][col_num] != '_')
+    while(row_num > 0 && board[row_num-1][col_num] != '_')
         row_num--;
-    row_num++;
     *pr = row_num;
     *pc = col_num;
 
@@ -383,9 +401,8 @@ is_horiz_word(int row_num, int col_num, int *pr, int *pc)
     }
     
     /* Find the beginning of the word */
-    while(col_num > 0 && board[row_num][col_num] != '_')
+    while(col_num > 0 && board[row_num][col_num-1] != '_')
         col_num--;
-    col_num++;
     *pr = row_num;
     *pc = col_num;
 
@@ -404,6 +421,37 @@ is_word(char *word)
     hent.key = word;
     return hsearch(hent, FIND)!=NULL;
 }
+
+
+void
+print_board(char b[LEN][LEN])
+{
+    int col, row;
+    int istty;
+
+    /*istty = (access("/dev/tty", F_OK)==0);*/
+    istty = 0;
+    for (row=0; row<LEN; row++) {
+        for (col=0; col<LEN; col++) {
+            if (istty && word_mult[row][col] == 3)
+                fputs(RED, stdout);
+            if (istty && word_mult[row][col] == 2)
+                fputs(BLUE, stdout);
+            if (istty && letter_mult[row][col] == 3)
+                fputs(GREEN, stdout);
+            if (istty && letter_mult[row][col] == 2)
+                fputs(ORANGE, stdout);
+            putc(b[row][col], stdout);
+            if (istty)
+                fputs(NORM, stdout);
+        }
+        putc('\n', stdout);
+    }
+}
+
+
+
+
 
 void
 search(int dir)
@@ -470,13 +518,13 @@ search(int dir)
 
                 /* words can't end right in-front of another word. */
                 if (dir == HORIZ) {
-                    if ((col_num+word_len)<(LEN-1)
-                            && board[row_num][col_num+word_len+1] != '_')
+                    if ((col_num+word_len)<LEN
+                            && board[row_num][col_num+word_len] != '_')
                         goto next_col;
                 }
                 else {
-                    if ((row_num+word_len)<(LEN-1)
-                            && board[row_num+word_len+1][col_num] != '_')
+                    if ((row_num+word_len)<LEN
+                            && board[row_num+word_len][col_num] != '_')
                         goto next_col;
                 }
 
@@ -576,10 +624,12 @@ search(int dir)
                 /* Looks like everything is nice and legal, so compute the
                  * total score. */
                 score = score_word(row_num, col_num, dir);
+//                printf("score(%s) = %d\n", w, score);
                 for(nix = 0; nix < num_new_words; nix++) {
                     score += score_word(new_words_r[nix],
                                         new_words_c[nix],
-                                        dir);
+                                        1-dir);
+//                    printf("score(%s) += %d\n", new_words[nix], score);
                     free(new_words[nix]);
                 }
 
@@ -591,6 +641,8 @@ search(int dir)
                     }
                 }
                 score += bonus;
+                if (debug_score)
+                    printf("Empty tray bonus: %d += %d\n", score, bonus);
 
                 /* Is this the best words we've found? */
                 if (score > best_score) {
@@ -611,44 +663,20 @@ next_word:
 }
 
 
-void
-print_result()
-{
-    int col, row;
-    int istty;
-
-    /*istty = (access("/dev/tty", F_OK)==0);*/
-    istty = 0;
-    for (row=0; row<LEN; row++) {
-        for (col=0; col<LEN; col++) {
-            if (istty && word_mult[row][col] == 3)
-                fputs(RED, stdout);
-            if (istty && word_mult[row][col] == 2)
-                fputs(BLUE, stdout);
-            if (istty && letter_mult[row][col] == 3)
-                fputs(GREEN, stdout);
-            if (istty && letter_mult[row][col] == 2)
-                fputs(ORANGE, stdout);
-            putc(best_board[row][col], stdout);
-            if (istty)
-                fputs(NORM, stdout);
-        }
-        putc('\n', stdout);
-    }
-}
-
-
 int
 main(int argc, char *argv[])
 {
     int opt;
 
-    while ((opt = getopt(argc, argv, "v")) != -1) {
+    while ((opt = getopt(argc, argv, "vs")) != -1) {
         switch(opt) {
             case 'v':
-                fprintf(stderr, "Version: %s\n", Version);
-                fprintf(stderr, "Date: %s\n", Date);
+                fprintf(stderr, "%s\n", Version);
+                fprintf(stderr, "%s\n", Date);
                 exit(0);
+            case 's':
+                debug_score=1;
+                break;
             default:
                 fprintf(stderr, "Huh(%c)\n", opt);
                 exit(99);
@@ -661,7 +689,7 @@ main(int argc, char *argv[])
     search(HORIZ);
     search(VERT);
 
-    print_result();
+    print_board(best_board);
 
 }
 
