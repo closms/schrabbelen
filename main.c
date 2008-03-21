@@ -1,4 +1,4 @@
-/* $Id: main.c,v 1.7 2008/03/21 02:21:40 mike Exp $ */
+/* $Id: main.c,v 1.8 2008/03/21 02:22:10 mike Exp $ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,8 +23,8 @@ enum {
 #define RED    "[00;31m"
 #define NORM   "[00m"
 
-char Version[] = "$Revision";
-char Date[] = "$Date";
+char Version[] = "$Revision: 1.8 $";
+char Date[] = "$Date: 2008/03/21 02:22:10 $";
 
 char board[LEN][LEN];
 char backup_board[LEN][LEN];
