@@ -1,3 +1,4 @@
+/* $Id: main.c,v 1.7 2008/03/21 02:21:40 mike Exp $ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +23,9 @@ enum {
 #define RED    "[00;31m"
 #define NORM   "[00m"
 
+char Version[] = "$Revision";
+char Date[] = "$Date";
+
 char board[LEN][LEN];
 char backup_board[LEN][LEN];
 char best_board[LEN][LEN];
@@ -39,12 +43,12 @@ char backup_letter_map[26];
 #define EMPTY_TRAY_BONUS 50
 
 int letter_scores[26] = {
- 1, 1, 1, 1, 1,  /* A, B, C, D, E */
- 1, 3, 4, 1, 1,  /* F, G, H, I, J */
- 1, 1, 1, 1, 1,  /* K, L, M, N, O */
- 1, 7, 1, 1, 1,  /* P, Q, R, S, T */
- 1, 1, 4, 1, 4,  /* U, V, W, X, Y */
- 6               /* Z */
+ 1, 3, 3, 2, 1,  /* A, B, C, D, E */
+ 4, 2, 4, 1, 8,  /* F, G, H, I, J */
+ 5, 1, 3, 1, 1,  /* K, L, M, N, O */
+ 3,10, 1, 1, 1,  /* P, Q, R, S, T */
+ 1, 4, 4, 8, 4,  /* U, V, W, X, Y */
+ 10              /* Z */
 };
 
 int letter_mult[LEN][LEN] = {
@@ -635,8 +639,21 @@ print_result()
 
 
 int
-main()
+main(int argc, char *argv[])
 {
+    int opt;
+
+    while ((opt = getopt(argc, argv, "v")) != -1) {
+        switch(opt) {
+            case 'v':
+                fprintf(stderr, "Version: %s\n", Version);
+                fprintf(stderr, "Date: %s\n", Date);
+                exit(0);
+            default:
+                fprintf(stderr, "Huh(%c)\n", opt);
+                exit(99);
+        }
+    }
 
     read_board();
     load_words();
