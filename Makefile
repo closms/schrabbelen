@@ -1,7 +1,11 @@
 CFLAGS = -W -ggdb
 
-scrabble_helper:  main.o
-	$(CC) $(CFLAGS) -o $@ $<
+PRG = scrabhlp
+
+OBJS = main.o hsearch.o hsearch_r.o
+
+$(PRG):  $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS)
 
 clean:
-	$(RM) main.o scrabble_helper
+	$(RM) $(OBJS) $(PRG)

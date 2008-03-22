@@ -1,4 +1,4 @@
-/* $Id: main.c,v 1.9 2008/03/21 04:19:31 mike Exp $ */
+/* $Id: main.c,v 1.10 2008/03/22 04:28:13 mike Exp $ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,8 +23,8 @@ enum {
 #define RED    "[00;31m"
 #define NORM   "[00m"
 
-char Version[] = "$Revision: 1.9 $";
-char Date[] = "$Date: 2008/03/21 04:19:31 $";
+char Version[] = "$Revision: 1.10 $";
+char Date[] = "$Date: 2008/03/22 04:28:13 $";
 
 char board[LEN][LEN];
 char backup_board[LEN][LEN];
@@ -36,6 +36,7 @@ char **words = NULL;
 int num_words = 0;
 int best_score = 0;
 int empty_board = 1;
+char wordfile[1024];
 
 char letter_map[26];
 char backup_letter_map[26];
@@ -188,23 +189,19 @@ load_words()
     FILE *f;
     int n, ix;
     char buf[1024];
+    int size = 1000;
 
-    f = popen("/usr/bin/wc -l words", "r");
+    f = fopen(wordfile, "r");
     if (f == NULL) {
-        perror("popen(/usr/bin/wc -l words) failed");
+        perror("Can't open word file. fopen() failed");
         exit(99);
     }
-    if (fscanf(f, "%d", &n) != 1) {
-        fprintf(stderr, "Failed to read number of words in dict/words.\n");
-        exit(99);
-    }
-    pclose(f);
 
-    f = fopen("words", "r");
-    if (f == NULL) {
-        perror("fopen(words) failed");
-        exit(99);
+    n = 0;
+    while(fscanf(f, "%s", buf)==1) {
+        n++;
     }
+    rewind(f);
 
     num_words = 0;
     words = malloc(n * sizeof(char *));
@@ -212,38 +209,35 @@ load_words()
         perror("malloc() failed");
         exit(99);
     }
-    if (hcreate(n) == 0) {
-        perror("hcreate()");
+    if (mhcreate(n) == 0) {
+        perror("mhcreate()");
         exit(99);
     }
-    for (ix = 0; ix < n; ix++) {
+    while(fscanf(f, "%s", buf) == 1) {
         char *pc;
         struct entry hent;
-        if (fgets(buf, 1024, f) != NULL) {
-            if (buf[strlen(buf)-1] == '\n')
-                buf[strlen(buf)-1] = 0;
-            for (pc=buf; *pc!=0; pc++) {
-                int b;
-                b = isupper(*pc);
-                if (b) {
-                    goto again;
-                }
-            }
-            pc = strdup(buf);
-            words[num_words++] = pc;
-#if 0
-            for (pc=words[num_words-1]; *pc!=0; pc++) {
-                *pc = tolower(*pc);
-            }
-#endif
-            /* Load word into word hash table */
-            hent.key = pc;
-            hent.data = (void*)1;
-            if (hsearch(hent, ENTER) == 0) {
-                perror("hearch()");
+        pc = strdup(buf);
+        if (num_words+1 == size) {
+            size += 1000;
+            words = realloc(words, size * sizeof(char*));
+            if (words == NULL) {
+                perror("realloc() failed");
                 exit(99);
             }
+        }
 
+        words[num_words++] = pc;
+#if 0
+        for (pc=words[num_words-1]; *pc!=0; pc++) {
+            *pc = tolower(*pc);
+        }
+#endif
+        /* Load word into word hash table */
+        hent.key = pc;
+        hent.data = (void*)1;
+        if (mhsearch(hent, ENTER) == 0) {
+            perror("hearch()");
+            exit(99);
         }
 again:
         ;
@@ -419,7 +413,7 @@ is_word(char *word)
 {
     struct entry hent;
     hent.key = word;
-    return hsearch(hent, FIND)!=NULL;
+    return mhsearch(hent, FIND)!=NULL;
 }
 
 
@@ -668,7 +662,9 @@ main(int argc, char *argv[])
 {
     int opt;
 
-    while ((opt = getopt(argc, argv, "vs")) != -1) {
+    strcpy(wordfile, "words");
+
+    while ((opt = getopt(argc, argv, "vsw:")) != -1) {
         switch(opt) {
             case 'v':
                 fprintf(stderr, "%s\n", Version);
@@ -676,6 +672,10 @@ main(int argc, char *argv[])
                 exit(0);
             case 's':
                 debug_score=1;
+                break;
+            case 'w':
+                strcpy(wordfile, optarg);
+                fprintf(stderr, "reading words from %s\n", wordfile);
                 break;
             default:
                 fprintf(stderr, "Huh(%c)\n", opt);
