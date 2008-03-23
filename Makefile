@@ -1,4 +1,4 @@
-CFLAGS = -W -ggdb
+CFLAGS = -W -Wall -ggdb
 
 PRG = scrabhlp
 

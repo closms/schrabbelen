@@ -1,4 +1,4 @@
-/* $Id: main.c,v 1.10 2008/03/22 04:28:13 mike Exp $ */
+/* $Id: main.c,v 1.11 2008/03/23 15:28:04 mike Exp $ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,6 +6,9 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <search.h>
+#include <time.h>
+
+#include "hs.h"
 
 enum {
     HORIZ,
@@ -14,21 +17,13 @@ enum {
 
 #define LEN 15  /* Can't change len. */
 
-#define GREY   "[00;37m"
-#define LBLUE  "[00;36m"
-#define PURPLE "[00;35m"
-#define BLUE   "[00;34m"
-#define ORANGE "[00;33m"
-#define GREEN  "[00;32m"
-#define RED    "[00;31m"
-#define NORM   "[00m"
-
-char Version[] = "$Revision: 1.10 $";
-char Date[] = "$Date: 2008/03/22 04:28:13 $";
+char Version[] = "$Revision: 1.11 $";
+char Date[] = "$Date: 2008/03/23 15:28:04 $";
 
 char board[LEN][LEN];
 char backup_board[LEN][LEN];
 char best_board[LEN][LEN];
+char blanks[LEN][LEN];
 char *tray = NULL;
 char *used_tray = NULL;
 int tray_size = 0;
@@ -38,10 +33,11 @@ int best_score = 0;
 int empty_board = 1;
 char wordfile[1024];
 
-char letter_map[26];
-char backup_letter_map[26];
+#define BLANK 26
+char letter_map[27];
+char backup_letter_map[27];
 
-int debug_score = 0;
+int debug = 0;
 
 #define EMPTY_TRAY_BONUS 50
 
@@ -80,7 +76,7 @@ int word_mult[LEN][LEN] = {
     {1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1},
     {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
     {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
-    {3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3},
+    {3, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 3},
     {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
     {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
     {1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1},
@@ -90,11 +86,26 @@ int word_mult[LEN][LEN] = {
     {3, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 3},
 };
 
-#define SCORE(x) (letter_scores[(x)-'a'])
+#define SCORE(x) ((x)=='?'?0:(letter_scores[(x)-'a']))
 
-#define FLAG_LETTER(x) (letter_map[(x)-'a']++)
+#define FLAG_LETTER(x) ((x)=='?'?(letter_map[BLANK]++):(letter_map[(x)-'a']++))
 
 int
+score(int row, int col)
+{
+    if (blanks[row][col]) {
+      return 0;
+    }
+    return SCORE(board[row][col]);
+}
+
+void
+reset_blanks()
+{
+    memset(blanks, 0, sizeof(blanks));
+}
+
+void
 reset_letter_map()
 {
     memcpy(letter_map, backup_letter_map, 26);
@@ -104,15 +115,20 @@ int
 enough_letters(char *word)
 {
     char *pc;
+    int rv = 0;
     int ret = 1;
     for (pc = word; *pc!=0; pc++) {
         letter_map[*pc-'a']--;
         if (letter_map[*pc-'a'] < 0) {
             ret = 0;
-            goto done;
+            rv += letter_map[*pc-'a'];
         }
     }
-done:
+    /* Special handling for blank tiles. (rv*-1) if the number of blank
+     * tiles we need to place this word. */
+    if ((rv*-1) > letter_map[BLANK])
+        ret = 1;
+
     reset_letter_map();
     return ret;
 }
@@ -130,13 +146,9 @@ read_board()
             fprintf(stderr, "Board must be %d columns.\n", LEN);
             exit(99);
         }
-        if (strlen(buf)-1 != LEN) {
+        if (strlen(buf) < LEN) {
             fprintf(stderr, "Line %d is wrong length, should be %d.\n",
                     ix+1, LEN);
-            exit(99);
-        }
-        if (strlen(buf) != (LEN+1)) {
-            fprintf(stderr, "Error in input, line %d\n", ix+1);
             exit(99);
         }
         for (ix2=0; ix2<LEN; ix2++) {
@@ -178,6 +190,7 @@ read_board()
     for (ix2 = 0; ix2 < tray_size; ix2++) {
         FLAG_LETTER(tray[ix2]);
     }
+    printf("read %d blank(s)\n", letter_map[BLANK]);
     fprintf(stderr, "Read %d tray letters.\n", strlen(tray));
 
     memcpy(backup_letter_map, letter_map, 26);
@@ -187,7 +200,7 @@ void
 load_words()
 {
     FILE *f;
-    int n, ix;
+    int n;
     char buf[1024];
     int size = 1000;
 
@@ -214,7 +227,7 @@ load_words()
         exit(99);
     }
     while(fscanf(f, "%s", buf) == 1) {
-        char *pc;
+        char *pc, *pcb;
         struct entry hent;
         pc = strdup(buf);
         if (num_words+1 == size) {
@@ -227,20 +240,19 @@ load_words()
         }
 
         words[num_words++] = pc;
-#if 0
+        pcb = pc;
         for (pc=words[num_words-1]; *pc!=0; pc++) {
-            *pc = tolower(*pc);
+            char c;
+            c = tolower(*pc);
+            *pc = c;
         }
-#endif
         /* Load word into word hash table */
-        hent.key = pc;
+        hent.key = pcb;
         hent.data = (void*)1;
         if (mhsearch(hent, ENTER) == 0) {
             perror("hearch()");
             exit(99);
         }
-again:
-        ;
     }
     fclose(f);
     fprintf(stderr, "Read %d words from dictionary.\n", num_words);
@@ -249,10 +261,7 @@ again:
 void
 save_best_board()
 {
-    int row;
-    for (row = 0; row < LEN; row++) {
-        memcpy(best_board[row], board[row], LEN*sizeof(char));
-    }
+    memcpy(best_board, board, sizeof(best_board));
 }
 
 void
@@ -271,10 +280,20 @@ int
 letter_avail(char c)
 {
     int ix;
+    int blank = -1;
+    /* Check for the actual letter */
     for (ix=0; ix < tray_size; ix++) {
+        if (tray[ix] == '?' && used_tray[ix] == 0) {
+            blank = ix;
+        }
         if (tray[ix] == c && used_tray[ix] == 0)
             return 1;
     }
+
+    /* Letter wasn't available, but a blank is, so use it. */
+    if (blank > -1)
+        return 2;
+
     return 0;
 }
 
@@ -282,56 +301,73 @@ void
 mark_used(char c)
 {
     int ix;
+    int blank = -1;
     for (ix=0; ix < tray_size; ix++) {
+        if (tray[ix] == '?' && used_tray[ix] == 0)
+            blank = ix;
         if (tray[ix] == c && used_tray[ix] == 0) {
             used_tray[ix] = 1;
             return;
         }
     }
-    assert(0);
+    assert(blank > -1);
+    used_tray[blank] = 1;
+    return;
 }
 
 int
 score_word(int row, int col, int dir)
 {
     int ix;
-    int score = 0;
+    int s = 0;
     int mult = 1;
-    int bonus;
 
-    if (debug_score)
+    if (debug)
         printf("SCORE:\n");
 
     if (dir == HORIZ) {
         /* Horizontal word */
         for (ix = col; ix < LEN && board[row][ix] != '_'; ix++) {
-            score += (SCORE(board[row][ix]) * letter_mult[row][ix]);
-            if (debug_score)
+            if (backup_board[row][ix] == '_')
+                s += (score(row, ix) * letter_mult[row][ix]);
+            else
+                s += (score(row, ix));
+            if (debug)
                 printf("(%c): %d += %d * %d\n",
                     board[row][ix],
-                    score,
-                    SCORE(board[row][ix]),
+                    s,
+                    score(row, ix),
                     letter_mult[row][ix]);
-            mult *= word_mult[row][ix];
+            if (backup_board[row][ix] == '_')
+                mult *= word_mult[row][ix];
+            else
+                mult *= 1;
         }
     }
     else {
         /* Vertical word */
         for (ix = row; ix < LEN && board[ix][col] != '_'; ix++) {
-            score += (SCORE(board[ix][col]) * letter_mult[ix][col]);
-            if (debug_score)
+            if (backup_board[ix][col] == '_')
+                s += (score(ix, col) * letter_mult[ix][col]);
+            else
+                s += (score(ix, col));
+
+            if (debug)
                 printf("(%c): %d += %d * %d\n",
                     board[ix][col],
-                    score,
-                    SCORE(board[ix][col]),
+                    s,
+                    score(ix, col),
                     letter_mult[ix][col]);
-            mult *= word_mult[ix][col];
+            if (backup_board[ix][col] == '_')
+               mult *= word_mult[ix][col];
+            else
+               mult *= 1;
         }
     }
 
-    if (debug_score)
-        printf("mult: %d = %d * %d\n", score*mult, score, mult);
-    return score * mult;
+    if (debug)
+        printf("mult: %d = %d * %d\n", s*mult, s, mult);
+    return s * mult;
 }
 
 char *
@@ -408,6 +444,8 @@ is_horiz_word(int row_num, int col_num, int *pr, int *pc)
     return strdup(buf);
 }
 
+
+
 int
 is_word(char *word)
 {
@@ -421,30 +459,14 @@ void
 print_board(char b[LEN][LEN])
 {
     int col, row;
-    int istty;
 
-    /*istty = (access("/dev/tty", F_OK)==0);*/
-    istty = 0;
     for (row=0; row<LEN; row++) {
         for (col=0; col<LEN; col++) {
-            if (istty && word_mult[row][col] == 3)
-                fputs(RED, stdout);
-            if (istty && word_mult[row][col] == 2)
-                fputs(BLUE, stdout);
-            if (istty && letter_mult[row][col] == 3)
-                fputs(GREEN, stdout);
-            if (istty && letter_mult[row][col] == 2)
-                fputs(ORANGE, stdout);
             putc(b[row][col], stdout);
-            if (istty)
-                fputs(NORM, stdout);
         }
         putc('\n', stdout);
     }
 }
-
-
-
 
 
 void
@@ -466,6 +488,9 @@ search(int dir)
         if (!enough_letters(w)) {
             continue;
         }
+        if (debug) {
+            printf("try %s\n", w);
+        }
         word_len = strlen(w);
 
         /* Output some indication that we're making progress. */
@@ -480,6 +505,9 @@ search(int dir)
 
         for (row_num=0; row_num<rstop; row_num++) {
             /* Try to place the word in a row */
+            if (debug) {
+               printf("try row %d ( < %d )\n", row_num, rstop);
+            }
 
             if (dir == HORIZ )
                 cstop = LEN-word_len+1;
@@ -487,6 +515,9 @@ search(int dir)
                 cstop = LEN;
 
             for (col_num=0; col_num<cstop; col_num++) {
+                if (debug) {
+                    printf("try col %d ( < %d )\n", col_num, cstop);
+                }
 
                 /* When we try anew to place the word, we need to reset
                  * the letter tray and the game board back to the original
@@ -494,6 +525,7 @@ search(int dir)
                  */
                 reset_board();
                 reset_tray();
+                reset_blanks();
                 attached_flag = 0;
                 placed_flag = 0;
                 /* Try to place word horizontally in row row_num and
@@ -503,23 +535,25 @@ search(int dir)
                 /* words can't start right after another word. */
                 if (dir == HORIZ) {
                     if (col_num > 0 && board[row_num][col_num-1] != '_')
-                        goto next_col;
+                        continue;
                 }
                 else {
                     if (row_num > 0 && board[row_num-1][col_num] != '_')
-                        goto next_col;
+                        continue;
                 }
 
                 /* words can't end right in-front of another word. */
                 if (dir == HORIZ) {
-                    if ((col_num+word_len)<LEN
-                            && board[row_num][col_num+word_len] != '_')
-                        goto next_col;
+                    if (((col_num+word_len)<LEN)
+                            && (board[row_num][col_num+word_len] != '_')) {
+                        continue;
+                    }
                 }
                 else {
-                    if ((row_num+word_len)<LEN
-                            && board[row_num+word_len][col_num] != '_')
-                        goto next_col;
+                    if (((row_num+word_len)<LEN)
+                            && (board[row_num+word_len][col_num] != '_')) {
+                        continue;
+                    }
                 }
 
                 /* Match up letters, iterate over the letters of the word. */
@@ -548,15 +582,22 @@ search(int dir)
                         }
                     }
                     else {
+                        int r;
                         /* Board space is empty, is the needed letter in our
                          * tray? */
-                        if (letter_avail(w[ltr])) {
+                        if ((r=letter_avail(w[ltr]))) {
                             /* Place the letter and move on. */
                             mark_used(w[ltr]);
-                            if (dir == HORIZ)
+                            if (dir == HORIZ) {
                                 board[row_num][col_num+ltr] = w[ltr];
-                            else
+                                if (r==2)
+                                    blanks[row_num][col_num+ltr] = 1;
+                            }
+                            else {
                                 board[row_num+ltr][col_num] = w[ltr];
+                                if (r==2)
+                                    blanks[row_num+ltr][col_num] = 1;
+                            }
                             placed_flag = 1;
                         }
                         else {
@@ -567,10 +608,8 @@ search(int dir)
                     }
                 }
 
-                if (attached_flag == 0 || placed_flag == 0) {
-                    /* Too bad, word isn't attached to the rest of the puzzle.
-                     */
-                    goto next_col;
+                if (debug) {
+                    printf("word %splaced.\n", (placed_flag?"":"not "));
                 }
 
                 /* Is it legal? */
@@ -588,54 +627,91 @@ search(int dir)
                     if (dir==HORIZ) {
                         /* New word is horiz, so check for vert words. */
                         if ((pc=is_vert_word(row_num, col_num+ltr,
-                                        &new_words_r[num_new_words],
-                                        &new_words_c[num_new_words]))!=NULL) {
+                                      &new_words_r[num_new_words],
+                                      &new_words_c[num_new_words]))!=NULL) {
                             new_words[num_new_words++] = pc;
+                            attached_flag = 1;
+                            if (debug) {
+                                printf("got new vert word '%s'\n", pc);
+                            }
                         }
                     }
                     else {
                         /* New word is vert so check for horiz words. */
                         if ((pc=is_horiz_word(row_num+ltr, col_num,
-                                        &new_words_r[num_new_words],
-                                        &new_words_c[num_new_words]))!=NULL) {
+                                      &new_words_r[num_new_words],
+                                      &new_words_c[num_new_words]))!=NULL) {
                             new_words[num_new_words++] = pc;
+                            attached_flag = 1;
                         }
                     }
+                }
+
+                if (debug) {
+                    printf("word %sattached\n", (attached_flag?"":"not "));
+                }
+
+                if (attached_flag == 0 || placed_flag == 0) {
+                    /* Too bad, word isn't attached to the rest of the
+                     * puzzle.
+                     */
+                    goto next_col;
                 }
 
                 /* From that list, check if the words are real words */
                 for (nix=0; nix<num_new_words; nix++) {
                     int isword = is_word(new_words[nix]);
                     if (!isword) {
-                        /* Bummer, free temp data, move on to next position. */
+                        /* Bummer, free temp data, move on to next
+                         * position. */
+                        if (debug) {
+                            printf("new word '%s', not a word. NEXT\n",
+                                new_words[nix]);
+                        }
                         for(ltr=0; ltr<num_new_words; ltr++) {
                             free(new_words[ltr]);
                         }
                         goto next_col;
                     }
+                    if (debug) {
+                      printf("Got new word: %s\n", new_words[nix]);
+                    }
+                }
+                if (debug) {
+                    printf("and the %d new words are OK.\n", num_new_words);
                 }
 
                 /* Looks like everything is nice and legal, so compute the
                  * total score. */
+                if (debug) {
+                    printf("SCORE: %s\n", w);
+                }
                 score = score_word(row_num, col_num, dir);
-//                printf("score(%s) = %d\n", w, score);
+                if (debug) {
+                    printf("score(%s) = %d\n", w, score);
+                }
                 for(nix = 0; nix < num_new_words; nix++) {
                     score += score_word(new_words_r[nix],
                                         new_words_c[nix],
                                         1-dir);
-//                    printf("score(%s) += %d\n", new_words[nix], score);
+                    if (debug) {
+                        printf("score(%s) += %d\n", new_words[nix], score);
+                    }
                     free(new_words[nix]);
                 }
 
                 /* Check for empty tray bonus. */
+		bonus = 0;
+		if (tray_size == 7) {
                 bonus = EMPTY_TRAY_BONUS;
-                for (nix=0; nix < tray_size; nix++) {
-                    if (used_tray[nix] == 0) {
-                        bonus = 0;
+                    for (nix=0; nix < tray_size; nix++) {
+                        if (used_tray[nix] == 0) {
+                            bonus = 0;
+                        }
                     }
                 }
                 score += bonus;
-                if (debug_score)
+                if (debug)
                     printf("Empty tray bonus: %d += %d\n", score, bonus);
 
                 /* Is this the best words we've found? */
@@ -647,11 +723,7 @@ search(int dir)
 next_col:
                 ;
             }
-next_row:
-            ;
         }
-next_word:
-        ;
     }
     fputc('\n', stderr);
 }
@@ -664,21 +736,20 @@ main(int argc, char *argv[])
 
     strcpy(wordfile, "words");
 
-    while ((opt = getopt(argc, argv, "vsw:")) != -1) {
+    while ((opt = getopt(argc, argv, "vxd:")) != -1) {
         switch(opt) {
             case 'v':
                 fprintf(stderr, "%s\n", Version);
                 fprintf(stderr, "%s\n", Date);
                 exit(0);
-            case 's':
-                debug_score=1;
+            case 'x':
+                debug=1;
                 break;
-            case 'w':
+            case 'd':
                 strcpy(wordfile, optarg);
                 fprintf(stderr, "reading words from %s\n", wordfile);
                 break;
             default:
-                fprintf(stderr, "Huh(%c)\n", opt);
                 exit(99);
         }
     }
@@ -691,6 +762,7 @@ main(int argc, char *argv[])
 
     print_board(best_board);
 
+    return 0;
 }
 
 
