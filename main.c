@@ -1,4 +1,4 @@
-/* $Id: main.c,v 1.11 2008/03/23 15:28:04 mike Exp $ */
+/* $Id: main.c,v 1.12 2008/04/09 02:44:55 mike Exp $ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,8 +17,8 @@ enum {
 
 #define LEN 15  /* Can't change len. */
 
-char Version[] = "$Revision: 1.11 $";
-char Date[] = "$Date: 2008/03/23 15:28:04 $";
+char Version[] = "$Revision: 1.12 $";
+char Date[] = "$Date: 2008/04/09 02:44:55 $";
 
 char board[LEN][LEN];
 char backup_board[LEN][LEN];
@@ -34,8 +34,9 @@ int empty_board = 1;
 char wordfile[1024];
 
 #define BLANK 26
-char letter_map[27];
-char backup_letter_map[27];
+char boardmap[27];
+char rowmap[15][27];
+char colmap[15][27];
 
 int debug = 0;
 
@@ -88,7 +89,7 @@ int word_mult[LEN][LEN] = {
 
 #define SCORE(x) ((x)=='?'?0:(letter_scores[(x)-'a']))
 
-#define FLAG_LETTER(x) ((x)=='?'?(letter_map[BLANK]++):(letter_map[(x)-'a']++))
+#define FLAG_LETTER(x,b) ((x)=='?'?((b)[BLANK]++):((b)[(x)-'a']++))
 
 int
 score(int row, int col)
@@ -105,31 +106,27 @@ reset_blanks()
     memset(blanks, 0, sizeof(blanks));
 }
 
-void
-reset_letter_map()
-{
-    memcpy(letter_map, backup_letter_map, 26);
-}
-
 int
-enough_letters(char *word)
+enough_letters(char *word, char *letter_map)
 {
     char *pc;
     int rv = 0;
     int ret = 1;
+    char local_map[27];
+
+    memcpy(local_map, letter_map, 27);
     for (pc = word; *pc!=0; pc++) {
-        letter_map[*pc-'a']--;
-        if (letter_map[*pc-'a'] < 0) {
+        local_map[*pc-'a']--;
+        if (local_map[*pc-'a'] < 0) {
             ret = 0;
-            rv += letter_map[*pc-'a'];
+            rv += local_map[*pc-'a'];
         }
     }
     /* Special handling for blank tiles. (rv*-1) if the number of blank
      * tiles we need to place this word. */
-    if ((rv*-1) > letter_map[BLANK])
+    if (local_map[BLANK] >= (rv*-1))
         ret = 1;
 
-    reset_letter_map();
     return ret;
 }
 
@@ -137,7 +134,7 @@ void
 read_board()
 {
     char buf[1024];
-    int ix, ix2;
+    int ix, ix2, ix3;
     char *pc;
 
     /* Read board. */
@@ -160,7 +157,9 @@ read_board()
             board[ix][ix2] = buf[ix2];
             backup_board[ix][ix2] = buf[ix2];
             if (buf[ix2] != '_') {
-                FLAG_LETTER(buf[ix2]);
+                FLAG_LETTER(buf[ix2], boardmap);
+                FLAG_LETTER(buf[ix2], rowmap[ix]);
+                FLAG_LETTER(buf[ix2], colmap[ix2]);
             }
         }
     }
@@ -187,13 +186,18 @@ read_board()
     used_tray = calloc(strlen(tray)+1, sizeof(int));
     assert(used_tray);
     tray_size = strlen(tray);
-    for (ix2 = 0; ix2 < tray_size; ix2++) {
-        FLAG_LETTER(tray[ix2]);
-    }
-    printf("read %d blank(s)\n", letter_map[BLANK]);
-    fprintf(stderr, "Read %d tray letters.\n", strlen(tray));
 
-    memcpy(backup_letter_map, letter_map, 26);
+    /* Add tray letters to maps */
+    for (ix2 = 0; ix2 < tray_size; ix2++) {
+        FLAG_LETTER(tray[ix2], boardmap);
+        for (ix3 = 0; ix3 < LEN; ix3++) {
+            FLAG_LETTER(tray[ix2], rowmap[ix3]);
+            FLAG_LETTER(tray[ix2], colmap[ix3]);
+        }
+    }
+
+    fprintf(stderr, "read %d blank(s)\n", boardmap[BLANK]);
+    fprintf(stderr, "Read %d tray letters.\n", strlen(tray));
 }
 
 void
@@ -485,9 +489,6 @@ search(int dir)
 
     for (word_num=0; word_num<num_words; word_num++) {
         w = words[word_num];
-        if (!enough_letters(w)) {
-            continue;
-        }
         if (debug) {
             printf("try %s\n", w);
         }
@@ -496,6 +497,9 @@ search(int dir)
         /* Output some indication that we're making progress. */
         if (word_num % 10000 == 0) {
             fputc('.', stderr);
+        }
+        if (!enough_letters(w, boardmap)) {
+            continue;
         }
     
         if (dir == HORIZ)
@@ -509,6 +513,15 @@ search(int dir)
                printf("try row %d ( < %d )\n", row_num, rstop);
             }
 
+            /* If placing a HORIZ letter, check if there are enough
+             * letters in the row. */
+            if (!enough_letters(w, rowmap[row_num])) {
+                if (debug) {
+                    printf("not enough letters.\n");
+                }
+                continue;
+            }
+
             if (dir == HORIZ )
                 cstop = LEN-word_len+1;
             else
@@ -517,6 +530,15 @@ search(int dir)
             for (col_num=0; col_num<cstop; col_num++) {
                 if (debug) {
                     printf("try col %d ( < %d )\n", col_num, cstop);
+                }
+
+                /* If placing a VERT word, check if there are enough
+                 * letters in the column. */
+                if (!enough_letters(w, colmap[col_num])) {
+                    if (debug) {
+                        printf("not enough letters.\n");
+                    }
+                    continue;
                 }
 
                 /* When we try anew to place the word, we need to reset
