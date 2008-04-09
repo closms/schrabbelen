@@ -1,4 +1,4 @@
-/* $Id: main.c,v 1.12 2008/04/09 02:44:55 mike Exp $ */
+/* $Id: main.c,v 1.13 2008/04/09 11:49:32 mike Exp $ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,8 +17,8 @@ enum {
 
 #define LEN 15  /* Can't change len. */
 
-char Version[] = "$Revision: 1.12 $";
-char Date[] = "$Date: 2008/04/09 02:44:55 $";
+char Version[] = "$Revision: 1.13 $";
+char Date[] = "$Date: 2008/04/09 11:49:32 $";
 
 char board[LEN][LEN];
 char backup_board[LEN][LEN];
@@ -515,7 +515,7 @@ search(int dir)
 
             /* If placing a HORIZ letter, check if there are enough
              * letters in the row. */
-            if (!enough_letters(w, rowmap[row_num])) {
+            if (dir==HORIZ && !enough_letters(w, rowmap[row_num])) {
                 if (debug) {
                     printf("not enough letters.\n");
                 }
@@ -534,7 +534,7 @@ search(int dir)
 
                 /* If placing a VERT word, check if there are enough
                  * letters in the column. */
-                if (!enough_letters(w, colmap[col_num])) {
+                if (dir==VERT && !enough_letters(w, colmap[col_num])) {
                     if (debug) {
                         printf("not enough letters.\n");
                     }
