@@ -1,4 +1,4 @@
-/* $Id: main.c,v 1.13 2008/04/09 11:49:32 mike Exp $ */
+/* $Id: main.c,v 1.14 2008/04/09 12:11:06 mike Exp $ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,14 +16,23 @@ enum {
 };
 
 #define LEN 15  /* Can't change len. */
+#define BLANK 26
+#define INC 10
 
-char Version[] = "$Revision: 1.13 $";
-char Date[] = "$Date: 2008/04/09 11:49:32 $";
+typedef char board_t[LEN][LEN];
+typedef char map_t[27];
 
-char board[LEN][LEN];
-char backup_board[LEN][LEN];
-char best_board[LEN][LEN];
-char blanks[LEN][LEN];
+char Version[] = "$Revision: 1.14 $";
+char Date[] = "$Date: 2008/04/09 12:11:06 $";
+
+board_t board;
+board_t backup_board;
+board_t *best_boards;
+int *best_scores;
+char **best_words;
+int best_boards_num = 0;
+int best_boards_size = 0;
+board_t blanks;
 char *tray = NULL;
 char *used_tray = NULL;
 int tray_size = 0;
@@ -33,10 +42,9 @@ int best_score = 0;
 int empty_board = 1;
 char wordfile[1024];
 
-#define BLANK 26
-char boardmap[27];
-char rowmap[15][27];
-char colmap[15][27];
+map_t boardmap;
+map_t rowmap[15];
+map_t colmap[15];
 
 int debug = 0;
 
@@ -51,7 +59,7 @@ int letter_scores[26] = {
  10              /* Z */
 };
 
-int letter_mult[LEN][LEN] = {
+board_t letter_mult = {
     {1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1},
     {1, 1, 1, 1, 1, 3, 1, 1, 1, 3, 1, 1, 1, 1, 1},
     {1, 1, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 1},
@@ -69,7 +77,7 @@ int letter_mult[LEN][LEN] = {
     {1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1},
 };
 
-int word_mult[LEN][LEN] = {
+board_t word_mult = {
     {3, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 3},
     {1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1},
     {1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1},
@@ -263,9 +271,28 @@ load_words()
 }
 
 void
-save_best_board()
+save_best_board(int score, char *word)
 {
-    memcpy(best_board, board, sizeof(best_board));
+    if (best_boards_num >= best_boards_size) {
+        board_t *tmp;
+        int *t2;
+        char **t3;
+        best_boards_size += INC;
+        tmp = realloc(best_boards, best_boards_size * sizeof(board_t));
+        assert(tmp);
+        best_boards = tmp;
+        t2 = realloc(best_scores, best_boards_size * sizeof(int));
+        assert(t2);
+        best_scores = t2;
+        t3 = realloc(best_words, best_boards_size * sizeof(char *));
+        assert(t3);
+        best_words = t3;
+    }
+
+    memcpy(best_boards[best_boards_num], board, sizeof(board_t));
+    best_scores[best_boards_num] = score;
+    best_words[best_boards_num] = word;
+    best_boards_num++;
 }
 
 void
@@ -740,7 +767,7 @@ search(int dir)
                 if (score > best_score) {
                     fprintf(stderr, "%s(%d)", w, score);
                     best_score = score;
-                    save_best_board();
+                    save_best_board(score, w);
                 }
 next_col:
                 ;
@@ -782,7 +809,13 @@ main(int argc, char *argv[])
     search(HORIZ);
     search(VERT);
 
-    print_board(best_board);
+    for (opt = 0; opt < best_boards_num; opt++) {
+        printf("Board: %d\n", opt);
+        printf("Score: %d\n", best_scores[opt]);
+        printf("Word : %s\n", best_words[opt]);
+        print_board(best_boards[opt]);
+        printf("\n\n");
+    }
 
     return 0;
 }
