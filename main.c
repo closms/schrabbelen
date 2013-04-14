@@ -1,4 +1,6 @@
-/* $Id: main.c,v 1.16 2013/04/14 06:05:37 mclosson Exp $ */
+/* $Id: main.c,v 1.17 2013/04/14 06:23:59 mclosson Exp $ */
+/* vim: cin et ts=4 sw=4
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,15 +23,19 @@ enum {
 
 typedef char board_t[LEN][LEN];
 typedef char map_t[27];
+typedef struct {
+    board_t board;
+    char word[LEN+1];
+    int score;
+} score_t;
 
-char Version[] = "$Revision: 1.16 $";
-char Date[] = "$Date: 2013/04/14 06:05:37 $";
+
+char Version[] = "$Revision: 1.17 $";
+char Date[] = "$Date: 2013/04/14 06:23:59 $";
 
 board_t board;
 board_t backup_board;
-board_t *best_boards;
-int *best_scores;
-char **best_words;
+score_t *best_boards;
 int best_boards_num = 0;
 int best_boards_size = 0;
 board_t blanks;
@@ -98,6 +104,14 @@ board_t word_mult = {
 #define SCORE(x) ((x)=='?'?0:(letter_scores[(x)-'a']))
 
 #define FLAG_LETTER(x,b) ((x)=='?'?((b)[BLANK]++):((b)[(x)-'a']++))
+
+int
+cmp_score(const void *v1, const void *v2)
+{
+    const score_t *s1 = v1;
+    const score_t *s2 = v2;
+    return s1->score - s2->score;
+}
 
 int
 score(int row, int col)
@@ -207,7 +221,7 @@ read_board()
     }
 
     fprintf(stderr, "read %d blank(s)\n", boardmap[BLANK]);
-    fprintf(stderr, "Read %d tray letters.\n", strlen(tray));
+    fprintf(stderr, "Read %lu tray letters.\n", strlen(tray));
 }
 
 void
@@ -276,24 +290,16 @@ void
 save_best_board(int score, char *word)
 {
     if (best_boards_num >= best_boards_size) {
-        board_t *tmp;
-        int *t2;
-        char **t3;
+        score_t *tmp;
         best_boards_size += INC;
-        tmp = realloc(best_boards, best_boards_size * sizeof(board_t));
+        tmp = realloc(best_boards, best_boards_size * sizeof(score_t));
         assert(tmp);
         best_boards = tmp;
-        t2 = realloc(best_scores, best_boards_size * sizeof(int));
-        assert(t2);
-        best_scores = t2;
-        t3 = realloc(best_words, best_boards_size * sizeof(char *));
-        assert(t3);
-        best_words = t3;
     }
 
-    memcpy(best_boards[best_boards_num], board, sizeof(board_t));
-    best_scores[best_boards_num] = score;
-    best_words[best_boards_num] = word;
+    memcpy(&best_boards[best_boards_num].board, board, sizeof(board_t));
+    best_boards[best_boards_num].score = score;
+    strcpy(best_boards[best_boards_num].word, word);
     best_boards_num++;
 }
 
@@ -490,13 +496,13 @@ is_word(char *word)
 
 
 void
-print_board(char b[LEN][LEN])
+print_board(score_t score)
 {
     int col, row;
 
     for (row=0; row<LEN; row++) {
         for (col=0; col<LEN; col++) {
-            putc(b[row][col], stdout);
+            putc(score.board[row][col], stdout);
         }
         putc('\n', stdout);
     }
@@ -926,12 +932,9 @@ search_vert()
                 if (debug)
                     printf("Empty tray bonus: %d += %d\n", score, bonus);
 
-                /* Is this the best words we've found? */
-                if (score > best_score) {
-                    fprintf(stderr, "%s(%d)", w, score);
-                    best_score = score;
-                    save_best_board(score, w);
-                }
+                fprintf(stderr, "%s(%d)", w, score);
+                best_score = score;
+                save_best_board(score, w);
 next_row:
                 ;
             }
@@ -972,10 +975,12 @@ main(int argc, char *argv[])
     search_horiz();
     search_vert();
 
+    qsort(best_boards, best_boards_num, sizeof(score_t), cmp_score);
+
     for (opt = 0; opt < best_boards_num; opt++) {
         printf("Board: %d\n", opt);
-        printf("Score: %d\n", best_scores[opt]);
-        printf("Word : %s\n", best_words[opt]);
+        printf("Score: %d\n", best_boards[opt].score);
+        printf("Word : %s\n", best_boards[opt].word);
         print_board(best_boards[opt]);
         printf("\n\n");
     }
