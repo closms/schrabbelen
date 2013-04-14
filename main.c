@@ -1,4 +1,4 @@
-/* $Id: main.c,v 1.19 2013/04/14 06:43:57 mclosson Exp $ */
+/* $Id: main.c,v 1.20 2013/04/14 06:50:39 mclosson Exp $ */
 /* vim: cin et ts=4 sw=4
  */
 #include <stdio.h>
@@ -30,8 +30,8 @@ typedef struct {
 } score_t;
 
 
-char Version[] = "$Revision: 1.19 $";
-char Date[] = "$Date: 2013/04/14 06:43:57 $";
+char Version[] = "$Revision: 1.20 $";
+char Date[] = "$Date: 2013/04/14 06:50:39 $";
 
 board_t board;
 board_t backup_board;
@@ -219,7 +219,7 @@ read_board()
         }
     }
 
-    printf("read %d blank(s)\n", boardmap[BLANK]);
+    printf("Read %d blank(s).\n", boardmap[BLANK]);
     printf("Read %lu tray letters.\n", strlen(tray));
 }
 
@@ -531,7 +531,7 @@ search_horiz()
 
         /* Output some indication that we're making progress. */
         if (word_num % 10000 == 0) {
-            fputc('.', stderr);
+            fputc('.', stdout);
         }
         if (!enough_letters(w, boardmap)) {
             continue;
@@ -751,7 +751,7 @@ search_vert()
 
         /* Output some indication that we're making progress. */
         if (word_num % 10000 == 0) {
-            fputc('.', stderr);
+            fputc('.', stdout);
         }
         if (!enough_letters(w, boardmap)) {
             continue;
