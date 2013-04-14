@@ -1,4 +1,4 @@
-/* $Id: main.c,v 1.17 2013/04/14 06:23:59 mclosson Exp $ */
+/* $Id: main.c,v 1.18 2013/04/14 06:40:11 mclosson Exp $ */
 /* vim: cin et ts=4 sw=4
  */
 #include <stdio.h>
@@ -30,8 +30,8 @@ typedef struct {
 } score_t;
 
 
-char Version[] = "$Revision: 1.17 $";
-char Date[] = "$Date: 2013/04/14 06:23:59 $";
+char Version[] = "$Revision: 1.18 $";
+char Date[] = "$Date: 2013/04/14 06:40:11 $";
 
 board_t board;
 board_t backup_board;
@@ -207,9 +207,9 @@ read_board()
         tray = strdup(buf);
         assert(tray);
     }
-    used_tray = calloc(strlen(tray)+1, sizeof(int));
-    assert(used_tray);
     tray_size = strlen(tray);
+    used_tray = calloc(tray_size, sizeof(char));
+    assert(used_tray);
 
     /* Add tray letters to maps */
     for (ix2 = 0; ix2 < tray_size; ix2++) {
@@ -312,7 +312,7 @@ reset_board()
 void
 reset_tray()
 {
-    memset(used_tray, 0, tray_size * sizeof(int));
+    memset(used_tray, 0, tray_size * sizeof(char));
 }
 
 int
@@ -984,6 +984,15 @@ main(int argc, char *argv[])
         print_board(best_boards[opt]);
         printf("\n\n");
     }
+
+    mhdestroy();
+    for (opt = 0; opt < num_words; opt++) {
+        free(words[opt]);
+    }
+    free(words);
+    free(best_boards);
+    free(used_tray);
+    free(tray);
 
     return 0;
 }
