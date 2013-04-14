@@ -1,4 +1,4 @@
-/* $Id: main.c,v 1.18 2013/04/14 06:40:11 mclosson Exp $ */
+/* $Id: main.c,v 1.19 2013/04/14 06:43:57 mclosson Exp $ */
 /* vim: cin et ts=4 sw=4
  */
 #include <stdio.h>
@@ -30,8 +30,8 @@ typedef struct {
 } score_t;
 
 
-char Version[] = "$Revision: 1.18 $";
-char Date[] = "$Date: 2013/04/14 06:40:11 $";
+char Version[] = "$Revision: 1.19 $";
+char Date[] = "$Date: 2013/04/14 06:43:57 $";
 
 board_t board;
 board_t backup_board;
@@ -44,7 +44,6 @@ char *used_tray = NULL;
 int tray_size = 0;
 char **words = NULL;
 int num_words = 0;
-int best_score = 0;
 int empty_board = 1;
 char wordfile[1024];
 
@@ -220,8 +219,8 @@ read_board()
         }
     }
 
-    fprintf(stderr, "read %d blank(s)\n", boardmap[BLANK]);
-    fprintf(stderr, "Read %lu tray letters.\n", strlen(tray));
+    printf("read %d blank(s)\n", boardmap[BLANK]);
+    printf("Read %lu tray letters.\n", strlen(tray));
 }
 
 void
@@ -283,7 +282,7 @@ load_words()
         }
     }
     fclose(f);
-    fprintf(stderr, "Read %d words from dictionary.\n", num_words);
+    printf("Read %d words from dictionary.\n", num_words);
 }
 
 void
@@ -714,18 +713,14 @@ search_horiz()
                 if (debug)
                     printf("Empty tray bonus: %d += %d\n", score, bonus);
 
-                /* Is this the best words we've found? */
-                if (score > best_score) {
-                    fprintf(stderr, "%s(%d)", w, score);
-                    best_score = score;
-                    save_best_board(score, w);
-                }
+                printf("%s(%d)", w, score);
+                save_best_board(score, w);
 next_col:
                 ;
             }
         }
     }
-    fputc('\n', stderr);
+    fputc('\n', stdout);
 }
 
 
@@ -932,15 +927,14 @@ search_vert()
                 if (debug)
                     printf("Empty tray bonus: %d += %d\n", score, bonus);
 
-                fprintf(stderr, "%s(%d)", w, score);
-                best_score = score;
+                printf("%s(%d)", w, score);
                 save_best_board(score, w);
 next_row:
                 ;
             }
         }
     }
-    fputc('\n', stderr);
+    fputc('\n', stdout);
 }
 
 
